@@ -1,331 +1,294 @@
-import React, { useMemo, useRef, useState } from "react";
-import Papa from "papaparse";
-import QRCode from "qrcode";
-import { jsPDF } from "jspdf";
-import dayjs from "dayjs";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Upload, FileDown, AlertTriangle, Copy, Check } from "lucide-react";
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GKR QR Card Generator (A4, credit-card size)</title>
+  <meta name="description" content="100% client-side QR card generator for GKR Karate membership numbers. No data uploaded or stored." />
+  <style>
+    :root{
+      --brand:#d0021b; --text:#111; --muted:#6b7280; --bg:#f6f7f9;
+      --card:#fff; --border:#e5e7eb; --error:#b91c1c; --errorbg:#fee2e2; --errorbd:#fecaca;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,"Helvetica Neue";background:var(--bg);color:var(--text);line-height:1.45}
+    .container{max-width:1100px;margin:0 auto;padding:24px}
+    h1{font-size:24px;margin:0 0 8px} h2{font-size:18px;margin:24px 0 8px}
+    p.small{font-size:12px;color:var(--muted)}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+    .row{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .input{display:block;width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;font-size:14px}
+    textarea.input{height:110px;resize:vertical}
+    .btn{display:inline-flex;align-items:center;gap:8px;background:#111;color:#fff;border:0;border-radius:12px;padding:10px 14px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-secondary{background:#f3f4f6;color:#111;border:1px solid var(--border)}
+    .muted{color:var(--muted);font-size:12px}
+    .notice{display:flex;gap:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:12px;padding:10px;font-size:14px}
+    .error{display:flex;gap:10px;background:var(--errorbg);border:1px solid var(--errorbd);border-radius:12px;padding:10px;font-size:14px;color:var(--error)}
+    .chip{display:inline-block;background:#fee2e2;color:#991b1b;border:1px solid #fecaca;border-radius:999px;padding:2px 8px;font-size:12px;margin-right:6px}
+    .grid{display:grid;grid-template-columns:1fr 1fr; gap:16px}
+    .preview{background:#fff;border:1px solid var(--border);border-radius:16px;padding:12px}
+    .card-canvas{position:relative;width:100%;aspect-ratio:85.6/54;border-radius:14px;border:1px solid var(--border);overflow:hidden;background:#fff}
+    .brandbar{position:absolute;left:0;right:0;top:0;height:40px;background:var(--brand);display:flex;align-items:center;padding:0 10px;color:#fff;font-weight:600}
+    .qrbox{position:absolute;top:56px;left:50%;transform:translateX(-50%);width:160px;height:160px;border-radius:12px;border:1px solid var(--border);display:grid;place-items:center;background:#fff}
+    .qrplaceholder{width:128px;height:128px;background:#111}
+    .bottom{position:absolute;left:0;right:0;bottom:12px;text-align:center}
+    .bottom .num{font-weight:700} .bottom .name{font-size:13px;color:#4b5563}
+    .footer{margin-top:12px;font-size:12px;color:var(--muted)} .spacer{height:6px}
+    @media (max-width:900px){.row{grid-template-columns:1fr}.grid{grid-template-columns:1fr}}
+    a{color:#0d5eea;text-decoration:none} a:hover{text-decoration:underline}
+  </style>
+  <!-- Lightweight libs from CDNs -->
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dayjs@1/dayjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <h1>GKR QR Card Generator</h1>
+    <p class="small">100% client‑side. Nothing is uploaded or stored. Close the tab to clear data. CSV columns: <code>MembershipNumber</code> (required) and <code>Name</code> (optional). Output: A4 PDF with credit‑card‑size (85.6×54&nbsp;mm) cards, rounded corners & crop marks.</p>
 
-/**
- * GKR QR Card Generator
- * - 100% client-side; no storage.
- * - CSV columns: MembershipNumber (required), Name (optional)
- * - Generates QR from raw membership number.
- * - Preview grid + duplicate detection.
- * - A4 PDF export, credit-card size 85.6 x 54 mm.
- * - Subtle crop marks, rounded corner outline, branding area.
- * - Helvetica/Inter-style font stack.
- */
+    <div class="card">
+      <div class="row">
+        <div>
+          <label class="muted">Upload CSV</label>
+          <input id="csvFile" class="input" type="file" accept=".csv" />
+          <div class="spacer"></div>
 
-const mm = (v) => v; // using jsPDF with 'mm' units
+          <label class="muted">Or paste rows (Number,Name)</label>
+          <textarea id="pasteArea" class="input" placeholder="00131334,Alex Smith&#10;00098765,Jordan A.&#10;00011122"></textarea>
+          <div class="spacer"></div>
+          <button id="parseBtn" class="btn btn-secondary">Parse now</button>
+          <span class="muted" style="margin-left:8px">Auto‑parses as you type too.</span>
+          <div class="spacer"></div>
 
-const CARD_W = 85.6; // mm (credit card)
-const CARD_H = 54;   // mm
-const PAGE_W = 210;  // A4 mm
-const PAGE_H = 297;  // A4 mm
-const MARGIN = 10;   // outer page margin mm
-const GUTTER_X = 8;  // horizontal gap mm
-const GUTTER_Y = 8;  // vertical gap mm
+          <label class="muted">Logo (optional)</label>
+          <input id="logoFile" class="input" type="file" accept="image/*" />
+        </div>
 
-// Compute columns/rows that fit nicely on A4 with the given margins & gutters
-const COLS = 2; // two columns of credit-card width
-const ROWS = 4; // four rows per page (8 cards / page)
+        <div>
+          <div class="notice"><div>🔒</div><div><strong>Privacy:</strong> All processing happens in your browser. Files never leave your device. No data is stored.</div></div>
+          <div class="spacer"></div>
+          <button id="exportBtn" class="btn" disabled>⬇️ Export A4 PDF</button>
+          <span id="count" class="muted" style="margin-left:8px">No records loaded</span>
+          <div id="dups" style="margin-top:8px"></div>
+          <div id="err" style="margin-top:8px"></div>
+        </div>
+      </div>
+    </div>
 
-// Quiet zone around QR for reliable scans
-const QR_SIZE = 34; // mm square within the card
+    <h2>Preview (first 8)</h2>
+    <div id="previewGrid" class="grid"></div>
 
-const BRAND = {
-  name: "GKR Karate",
-  // Brand colours (adjustable in UI)
-  primary: "#D0021B", // GKR red (approx)
-  text: "#111111",
-};
+    <div class="footer">
+      Tip: Credit‑card size 85.6×54&nbsp;mm, QR ≈ 34&nbsp;mm. Subtle crop marks are included.
+    </div>
+  </div>
 
-export default function App() {
-  const [rows, setRows] = useState([]); // {number, name}
-  const [logoDataUrl, setLogoDataUrl] = useState(null);
-  const [csvName, setCsvName] = useState("");
-  const [copyOk, setCopyOk] = useState(false);
+<script>
+(() => {
+  const { jsPDF } = window.jspdf;
 
-  const duplicates = useMemo(() => {
-    const seen = new Map();
-    const dups = new Set();
-    rows.forEach((r) => {
-      const n = r.number?.trim();
-      if (!n) return;
-      if (seen.has(n)) dups.add(n);
-      else seen.set(n, true);
-    });
-    return [...dups];
-  }, [rows]);
+  const CARD_W = 85.6, CARD_H = 54;
+  const MARGIN = 10, GUTTER_X = 8, GUTTER_Y = 8;
+  const COLS = 2, ROWS = 4;
+  const QR_SIZE = 34;
 
-  function handleCsvFile(file) {
-    if (!file) return;
-    setCsvName(file.name);
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      transformHeader: (h) => h.trim(),
-      complete: (res) => {
-        const parsed = res.data
-          .map((r) => ({
-            number: (r.MembershipNumber || r.membershipnumber || r.number || r.Number || "").toString().trim(),
-            name: (r.Name || r.name || "").toString().trim(),
-          }))
-          .filter((r) => r.number);
-        setRows(parsed);
-      },
-    });
+  const state = { rows: [], logoDataUrl: null };
+
+  const csvFile = document.getElementById("csvFile");
+  const pasteArea = document.getElementById("pasteArea");
+  const logoFile = document.getElementById("logoFile");
+  const exportBtn = document.getElementById("exportBtn");
+  const parseBtn  = document.getElementById("parseBtn");
+  const count = document.getElementById("count");
+  const dups = document.getElementById("dups");
+  const grid = document.getElementById("previewGrid");
+  const err = document.getElementById("err");
+
+  // Accept many header variants for membership number
+  const HEADER_ALIASES = [
+    "membershipnumber","membership number","membership no","membership_no",
+    "member id","memberid","member number","member_no","number","id"
+  ];
+
+  function detectDelimiter(text){
+    const candidates = [",",";","\\t","|"];
+    let best=",", bestCount=-1;
+    for(const d of candidates){
+      const c = (text.split("\\n")[0]||"").split(d).length;
+      if(c>bestCount){bestCount=c;best=d;}
+    }
+    return best;
+  }
+  const norm = s => String(s||"").trim().toLowerCase();
+
+  function findNumberField(headers){
+    const n = headers.map(norm);
+    for(const a of HEADER_ALIASES){
+      const i = n.indexOf(a);
+      if(i>=0) return i;
+    }
+    for(let i=0;i<n.length;i++){ if(/member|number|id/.test(n[i])) return i; }
+    return -1;
   }
 
-  function handlePaste(text) {
-    // Support quick paste: two columns (number, name) or single column
-    const parsed = Papa.parse(text.trim(), { delimiter: ",", newline: "\n" });
-    const out = [];
-    parsed.data.forEach((row) => {
-      if (!row || row.length === 0) return;
-      if (row.length === 1) {
-        const n = (row[0] || "").toString().trim();
-        if (n) out.push({ number: n, name: "" });
-      } else {
-        const n = (row[0] || "").toString().trim();
-        const nm = (row[1] || "").toString().trim();
-        if (n) out.push({ number: n, name: nm });
-      }
-    });
-    setRows(out);
+  function updateRows(rows){
+    state.rows = rows;
+    exportBtn.disabled = !rows.length;
+    count.textContent = rows.length ? `${rows.length} record${rows.length===1?"":"s"} ready` : "No records loaded";
+    renderPreview();
+    showDuplicates(rows);
   }
 
-  async function makeQrDataUrl(text) {
-    // Ensure quiet zone & high contrast
-    return await QRCode.toDataURL(text, {
-      errorCorrectionLevel: "M",
-      margin: 1, // around modules
-      scale: 8,
-      color: { dark: "#000000", light: "#FFFFFF" },
+  function showError(msg, details){
+    err.innerHTML = `<div class="error">⚠️ <div><strong>${msg}</strong>${details?`<div class='muted'>${details}</div>`:""}</div></div>`;
+  }
+  function clearError(){ err.innerHTML=""; }
+
+  csvFile.addEventListener("change",(e)=>{
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    Papa.parse(f,{
+      header:true, skipEmptyLines:true, transformHeader:h=>h.trim(),
+      complete:(res)=>{
+        const headers = res.meta.fields || [];
+        const idxNum = findNumberField(headers);
+        const idxName = headers.map(norm).indexOf("name");
+        const out = [];
+        res.data.forEach(r=>{
+          const cells = headers.map(h=>r[h]);
+          const number = idxNum>=0 ? String(cells[idxNum]||"").trim() : "";
+          const name = idxName>=0 ? String(cells[idxName]||"").trim() : String(r.Name||r.name||"").trim();
+          if(number) out.push({number, name});
+        });
+        if(!out.length){
+          showError("No membership numbers found in CSV.",
+            `Detected headers: ${headers.join(", ")||"(none)"}.
+             Expected a column like: MembershipNumber, Membership No, MemberID, Number, ID.`);
+        } else clearError();
+        updateRows(out);
+      }
     });
+  });
+
+  let debounce;
+  pasteArea.addEventListener("input", ()=>{
+    clearTimeout(debounce);
+    debounce = setTimeout(parsePasted, 300);
+  });
+  parseBtn.addEventListener("click", parsePasted);
+
+  function parsePasted(){
+    const text = pasteArea.value.trim();
+    if(!text){ updateRows([]); return; }
+    const delim = detectDelimiter(text);
+    const parsed = Papa.parse(text,{ delimiter:delim, newline:"\\n" });
+    const out=[];
+    (parsed.data||[]).forEach(row=>{
+      if(!row || row.length===0) return;
+      const n = String(row[0]||"").trim();
+      const nm = String(row[1]||"").trim();
+      if(n) out.push({number:n, name:nm});
+    });
+    if(!out.length){
+      showError("Couldn’t parse any rows from the pasted text.",
+        "Tip: first column should be the membership number; second column (optional) is the name.");
+    } else clearError();
+    updateRows(out);
   }
 
-  async function exportPdf() {
-    if (!rows.length) return;
-    const doc = new jsPDF({ unit: "mm", format: "a4" });
+  logoFile.addEventListener("change",(e)=>{
+    const f = e.target.files && e.target.files[0];
+    if(!f) return;
+    const reader = new FileReader();
+    reader.onload = ()=> state.logoDataUrl = reader.result;
+    reader.readAsDataURL(f);
+  });
 
-    // Font setup: use built-in Helvetica for a clean sans look similar to Helvetica Neue/Inter
-    doc.setFont("helvetica", "normal");
+  function showDuplicates(rows){
+    const seen=new Map(), dup=[];
+    rows.forEach(r=>{
+      const n=(r.number||"").trim();
+      if(!n) return;
+      if(seen.has(n)) dup.push(n); else seen.set(n,true);
+    });
+    dups.innerHTML = dup.length ? `<span class="chip">Duplicates:</span> ${dup.join(", ")}` : "";
+  }
 
-    let x0 = MARGIN;
-    let y0 = MARGIN;
-    let col = 0;
-    let row = 0;
+  function renderPreview(){
+    grid.innerHTML="";
+    state.rows.slice(0,8).forEach(r=>{
+      const div=document.createElement("div");
+      div.className="preview";
+      div.innerHTML = `
+        <div class="card-canvas">
+          <div class="brandbar">GKR Karate</div>
+          <div class="qrbox"><div class="qrplaceholder"></div></div>
+          <div class="bottom">
+            <div class="num">${escapeHtml(r.number)}</div>
+            ${r.name ? `<div class="name">${escapeHtml(r.name)}</div>` : ""}
+          </div>
+        </div>`;
+      grid.appendChild(div);
+    });
+  }
+  function escapeHtml(s){return (s||"").replace(/[&<>\"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));}
 
-    for (let i = 0; i < rows.length; i++) {
-      if (i > 0) {
-        col++;
-        if (col >= COLS) {
-          col = 0;
-          row++;
-          if (row >= ROWS) {
-            // New page
-            doc.addPage();
-            row = 0;
-          }
-        }
-      }
+  async function makeQrDataUrl(text){
+    return await QRCode.toDataURL(text,{
+      errorCorrectionLevel:"M", margin:1, scale:8, color:{dark:"#000000", light:"#FFFFFF"}
+    });
+  }
+  function centerText(doc, text, cx, y){ const w = doc.getTextWidth(text); doc.text(text, cx - w/2, y); }
+  function roundedRect(doc, x,y,w,h,r){ doc.setDrawColor(200); doc.roundedRect(x,y,w,h,r,r,"S"); }
+  function drawCropMarks(doc, x,y,w,h){
+    const len=4, off=1.5; doc.setDrawColor(190);
+    doc.line(x-off-len, y-off, x-off, y-off); doc.line(x-off, y-off-len, x-off, y-off);
+    doc.line(x+w+off, y-off, x+w+off+len, y-off); doc.line(x+w+off, y-off-len, x+w+off, y-off);
+    doc.line(x-off-len, y+h+off, x-off, y+h+off); doc.line(x-off, y+h+off, x-off, y+h+off+len);
+    doc.line(x+w+off, y+h+off, x+w+off+len, y+h+off); doc.line(x+w+off, y+h+off, x+w+off, y+h+off+len);
+  }
 
-      const x = MARGIN + col * (CARD_W + GUTTER_X);
-      const y = MARGIN + row * (CARD_H + GUTTER_Y);
+  async function exportPdf(){
+    if(!state.rows.length){ showError("No records to export."); return; }
+    clearError();
+    const doc = new jsPDF({ unit:"mm", format:"a4" });
+    doc.setFont("helvetica","normal");
 
-      // Draw rounded-card outline (for visual cutting aid after lamination)
-      roundedRect(doc, x, y, CARD_W, CARD_H, 3);
+    let col=0, row=0;
+    for(let i=0;i<state.rows.length;i++){
+      if(i>0){ col++; if(col>=COLS){ col=0; row++; if(row>=ROWS){ doc.addPage(); row=0; } } }
+      const x = 10 + col*(CARD_W+8);
+      const y = 10 + row*(CARD_H+8);
 
-      // Subtle crop marks (outside the corners)
-      drawCropMarks(doc, x, y, CARD_W, CARD_H);
+      roundedRect(doc, x,y, CARD_W, CARD_H, 3);
+      drawCropMarks(doc, x,y, CARD_W, CARD_H);
 
-      // Branding bar (top)
-      const brandBarH = 10;
-      doc.setFillColor(BRAND.primary);
-      doc.roundedRect(x, y, CARD_W, brandBarH, 2, 2, "F");
+      const brandBarH=10;
+      doc.setFillColor("#d0021b");
+      doc.roundedRect(x, y, CARD_W, brandBarH, 2,2, "F");
+      doc.setTextColor(255); doc.setFontSize(9); doc.text("GKR Karate", x+3, y+6.5);
 
-      // Logo + Brand name (white)
-      doc.setTextColor(255);
-      doc.setFontSize(9);
-      const brandText = BRAND.name;
-      // Simple logo: if provided, draw image; otherwise text only
-      if (logoDataUrl) {
-        const imgH = 6;
-        const imgW = imgH * 1.2;
-        doc.addImage(logoDataUrl, "PNG", x + 3, y + 2, imgW, imgH, undefined, "FAST");
-        doc.text(brandText, x + 3 + imgW + 2, y + 6.5);
-      } else {
-        doc.text(brandText, x + 3, y + 6.5);
-      }
+      const cardCx = x + CARD_W/2;
+      const qrX = cardCx - QR_SIZE/2, qrY = y + 14;
+      const dataUrl = await makeQrDataUrl(state.rows[i].number);
+      doc.addImage(dataUrl, "PNG", qrX, qrY, QR_SIZE, QR_SIZE, undefined, "FAST");
 
-      // QR code area
-      const cardCx = x + CARD_W / 2;
-      const qrX = cardCx - QR_SIZE / 2;
-      const qrY = y + 14;
+      doc.setTextColor("#111"); doc.setFont("helvetica","bold"); doc.setFontSize(11);
+      centerText(doc, state.rows[i].number, cardCx, qrY + QR_SIZE + 8);
 
-      const qrDataUrl = await makeQrDataUrl(rows[i].number);
-      doc.addImage(qrDataUrl, "PNG", qrX, qrY, QR_SIZE, QR_SIZE, undefined, "FAST");
-
-      // Human-readable text (membership number + optional name)
-      doc.setTextColor(BRAND.text);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(11);
-      centerText(doc, rows[i].number, cardCx, qrY + QR_SIZE + 8);
-
-      if (rows[i].name) {
-        doc.setFont("helvetica", "normal");
-        doc.setFontSize(9);
-        centerText(doc, rows[i].name, cardCx, qrY + QR_SIZE + 14);
+      if(state.rows[i].name){
+        doc.setFont("helvetica","normal"); doc.setFontSize(9);
+        centerText(doc, state.rows[i].name, cardCx, qrY + QR_SIZE + 14);
       }
     }
-
     const dateStr = dayjs().format("YYYY-MM-DD");
-    const outName = `GKR-QR-Cards-${dateStr}.pdf`;
-    doc.save(outName);
+    doc.save(`GKR-QR-Cards-${dateStr}.pdf`);
   }
-
-  return (
-    <div className="min-h-screen bg-neutral-50 text-neutral-900">
-      <div className="max-w-6xl mx-auto p-6 space-y-6">
-        <h1 className="text-2xl font-bold tracking-tight">GKR QR Card Generator</h1>
-        <p className="text-sm text-neutral-600 leading-relaxed">
-          100% client‑side. Nothing is uploaded or stored. Close the tab to clear data. CSV columns: <code>MembershipNumber</code> (required) and <code>Name</code> (optional). Output: A4 PDF with credit‑card‑size cards, rounded corners, crop marks, and branding.
-        </p>
-
-        <Card className="shadow-sm">
-          <CardContent className="p-4 grid gap-4 md:grid-cols-2">
-            <div className="space-y-3">
-              <label className="text-sm font-medium">Upload CSV</label>
-              <Input type="file" accept=".csv" onChange={(e) => handleCsvFile(e.target.files?.[0])} />
-              <p className="text-xs text-neutral-500">Columns: MembershipNumber, Name (optional). {csvName && <span className="text-neutral-700">Loaded: {csvName}</span>}</p>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Or paste rows (Number,Name)</label>
-                <textarea
-                  className="w-full h-28 rounded-xl border p-2 text-sm"
-                  placeholder={"00131334,Alex Smith\n00098765,Jordan A.\n00011122"}
-                  onBlur={(e) => handlePaste(e.target.value)}
-                />
-                <p className="text-xs text-neutral-500">Paste and click outside the box to parse.</p>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-sm font-medium">Logo (PNG/SVG recommended)</label>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (!f) return;
-                    const reader = new FileReader();
-                    reader.onload = () => setLogoDataUrl(reader.result);
-                    reader.readAsDataURL(f);
-                  }}
-                />
-                <p className="text-xs text-neutral-500">If omitted, the brand line prints as text only.</p>
-              </div>
-            </div>
-
-            <div className="space-y-3">
-              <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 rounded-xl p-3">
-                <AlertTriangle className="w-4 h-4 mt-0.5" />
-                <p className="text-sm leading-snug">
-                  <strong>Privacy:</strong> All processing happens in your browser. Files never leave your device. No data is stored.
-                </p>
-              </div>
-
-              <div className="flex items-center gap-3 pt-1">
-                <Button onClick={exportPdf} disabled={!rows.length} className="gap-2">
-                  <FileDown className="w-4 h-4" /> Export A4 PDF
-                </Button>
-                <span className="text-sm text-neutral-500">{rows.length ? `${rows.length} record${rows.length===1?"":"s"} ready` : "No records loaded"}</span>
-              </div>
-
-              {duplicates.length > 0 && (
-                <div className="text-sm text-red-600">
-                  Duplicates detected: {duplicates.join(", ")}
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Preview Grid */}
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold">Preview (not exact print rendering)</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {rows.slice(0, 8).map((r, idx) => (
-              <div key={idx} className="p-4 rounded-2xl bg-white border shadow-sm">
-                <CardPreview number={r.number} name={r.name} logoDataUrl={logoDataUrl} />
-              </div>
-            ))}
-          </div>
-          {rows.length > 8 && (
-            <p className="text-xs text-neutral-500">Showing first 8 of {rows.length}. All will be included in the PDF.</p>
-          )}
-        </div>
-
-        <div className="pt-2 text-xs text-neutral-500">
-          Tip: Credit‑card size {CARD_W}×{CARD_H}mm, QR ≈ {QR_SIZE}mm. Subtle crop marks are included for trimming prior to laminating.
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function CardPreview({ number, name, logoDataUrl }) {
-  return (
-    <div className="relative w-full aspect-[85.6/54] rounded-2xl border overflow-hidden bg-white">
-      {/* branding bar */}
-      <div className="absolute inset-x-0 top-0 h-10 flex items-center px-3" style={{ background: BRAND.primary }}>
-        {logoDataUrl ? (
-          <img src={logoDataUrl} alt="logo" className="h-5 w-auto" />
-        ) : (
-          <div className="text-white font-medium">{BRAND.name}</div>
-        )}
-      </div>
-      {/* QR mock */}
-      <div className="absolute top-12 left-1/2 -translate-x-1/2 w-40 h-40 bg-white border rounded-xl grid place-items-center">
-        <div className="w-32 h-32 bg-neutral-900" />
-      </div>
-      <div className="absolute bottom-4 left-0 right-0 text-center">
-        <div className="font-semibold tracking-wide">{number}</div>
-        {name && <div className="text-sm text-neutral-600">{name}</div>}
-      </div>
-    </div>
-  );
-}
-
-// Helpers
-function centerText(doc, text, cx, y) {
-  const w = doc.getTextWidth(text);
-  doc.text(text, cx - w / 2, y);
-}
-
-function roundedRect(doc, x, y, w, h, r) {
-  // Draw rounded rect path then stroke with light gray
-  doc.setDrawColor(200);
-  doc.roundedRect(x, y, w, h, r, r, "S");
-}
-
-function drawCropMarks(doc, x, y, w, h) {
-  const len = 4; // mm
-  const off = 1.5; // gap from corner
-  doc.setDrawColor(190);
-  // top-left
-  doc.line(x - off - len, y - off, x - off, y - off);
-  doc.line(x - off, y - off - len, x - off, y - off);
-  // top-right
-  doc.line(x + w + off, y - off, x + w + off + len, y - off);
-  doc.line(x + w + off, y - off - len, x + w + off, y - off);
-  // bottom-left
-  doc.line(x - off - len, y + h + off, x - off, y + h + off);
-  doc.line(x - off, y + h + off, x - off, y + h + off + len);
-  // bottom-right
-  doc.line(x + w + off, y + h + off, x + w + off + len, y + h + off);
-  doc.line(x + w + off, y + h + off, x + w + off, y + h + off + len);
-}
+  document.getElementById("exportBtn").addEventListener("click", exportPdf);
+})();
+</script>
+</body>
+</html>
