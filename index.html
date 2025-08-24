@@ -95,11 +95,13 @@
     const doc = new jsPDF({ unit: "mm", format: "a4" });
     doc.setFont("helvetica", "normal");
 
+    // layout constants
     const CARD_W = 85.6, CARD_H = 54;
     const MARGIN = 10, GUTTER_X = 8, GUTTER_Y = 8;
     const COLS = 2, ROWS = 4;
     const QR_SIZE = 34;
 
+    // draw all cards
     let col = 0, row = 0;
     for (let i = 0; i < state.rows.length; i++) {
       if (i > 0) {
@@ -109,7 +111,6 @@
       const x = MARGIN + col * (CARD_W + GUTTER_X);
       const y = MARGIN + row * (CARD_H + GUTTER_Y);
 
-      // borders & crop marks
       roundedRect(doc, x, y, CARD_W, CARD_H, 3);
       drawCropMarks(doc, x, y, CARD_W, CARD_H);
 
@@ -120,12 +121,14 @@
       doc.setTextColor(255); doc.setFontSize(9);
       doc.text("GKR Karate", x + 3, y + 6.5);
 
-      // QR
+      // QR code
       const cardCx = x + CARD_W / 2;
       const qrX = cardCx - QR_SIZE / 2;
       const qrY = y + 14;
       const dataUrl = await QRCode.toDataURL(state.rows[i].number, {
-        errorCorrectionLevel: "M", margin: 1, scale: 8,
+        errorCorrectionLevel: "M",
+        margin: 1,
+        scale: 8,
         color: { dark: "#000000", light: "#FFFFFF" },
       });
       doc.addImage(dataUrl, "PNG", qrX, qrY, QR_SIZE, QR_SIZE, undefined, "FAST");
@@ -133,29 +136,41 @@
       // text
       doc.setTextColor("#111"); doc.setFont("helvetica", "bold"); doc.setFontSize(11);
       centerText(doc, state.rows[i].number, cardCx, qrY + QR_SIZE + 8);
-      if (state.rows[i].name) { doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-        centerText(doc, state.rows[i].name, cardCx, qrY + QR_SIZE + 14); }
+      if (state.rows[i].name) {
+        doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+        centerText(doc, state.rows[i].name, cardCx, qrY + QR_SIZE + 14);
+      }
     }
 
-    // Robust download (works even when save() is blocked)
     const dateStr = dayjs().format("YYYY-MM-DD");
-    const blob = doc.output("blob");
-    const url = URL.createObjectURL(blob);
+    const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent);
 
-    // Prefer opening in a new tab (reliable on iOS/Safari)
-    const win = window.open(url, "_blank");
-    if (!win) {
-      // Fallback: force a download
+    if (isIOS) {
+      // iOS-friendly: open the PDF in a new tab (or same tab if popups are blocked)
+      const dataURL = doc.output("dataurlstring"); // "data:application/pdf;base64,..."
+      const win = window.open("", "_blank");
+      if (win) {
+        win.document.open();
+        win.document.write(
+          `<iframe src="${dataURL}" style="border:0;width:100vw;height:100vh"></iframe>`
+        );
+        win.document.close();
+      } else {
+        // Fallback: replace current tab (use Back to return)
+        window.location.href = dataURL;
+      }
+    } else {
+      // Desktop / Android: normal download
+      const blob = doc.output("blob");
+      const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
       a.download = `GKR-QR-Cards-${dateStr}.pdf`;
       document.body.appendChild(a);
       a.click();
       a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
     }
-
-    // Cleanup the blob URL
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 </script>
 </body>
